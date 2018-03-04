@@ -25,6 +25,9 @@ void KalmanFilter::Predict() {
   TODO:
     * predict the state
   */
+	x_ = F_ * x_;
+	MatrixXd Ft = F_.transpose();
+	P_ = F_ * P_ * Ft + Q_;
 }
 
 void KalmanFilter::Update(const VectorXd &z) {
@@ -32,6 +35,19 @@ void KalmanFilter::Update(const VectorXd &z) {
   TODO:
     * update the state by using Kalman Filter equations
   */
+	VectorXd z_pred = H_ * x_;
+	VectorXd y = z - z_pred;
+	MatrixXd Ht = H_.transpose();
+	MatrixXd S = H_ * P_ * Ht + R_;
+	MatrixXd Si = S.inverse();
+	MatrixXd PHt = P_ * Ht;
+	MatrixXd K = PHt * Si;
+
+	//new estimate
+	x_ = x_ + (K * y);
+	long x_size = x_.size();
+	MatrixXd I = MatrixXd::Identity(x_size, x_size);
+	P_ = (I - K * H_) * P_;
 }
 
 void KalmanFilter::UpdateEKF(const VectorXd &z) {
@@ -39,4 +55,86 @@ void KalmanFilter::UpdateEKF(const VectorXd &z) {
   TODO:
     * update the state by using Extended Kalman Filter equations
   */
+}
+
+
+/////////////////////////////////////////////
+
+StateBelief KalmanFilter(
+    const StateBelief &priorBelief, 
+    const VectorXd &control,
+    const VectorXd &measurement,
+    const MatrixXd &stateTransition,
+    const MatrixXd &controlTransition,
+    const MatrixXd &processCovariance,
+    const MatrixXd &measTransition,
+    const MatrixXd &measCovariance)
+{
+    VectorXd x = priorBelief.state;
+    MatrixXd S = priorBelief.covariance;
+    const VectorXd &u = control;
+    const VectorXd &z = measurement;
+
+    // predict belief based on prior belief & new control
+    const MatrixXd &A = stateTransition;
+    const MatrixXd &B = controlTransition;
+    const MatrixXd &R = processCovariance;
+    Matrix At = A.transpose();
+    x = A*x + B*u;
+    S = A*S*At + R;
+
+    // update belief based on prediction & measurement
+    const MatrixXd &C = measTransition;
+    const MatrixXd &Q = measCovariance;
+    MatrixXd Ct = C.transpose();
+    MatrixXd I = MatrixXd::Identity(x.size(), x.size());
+    MatrixXd K = S*Ct*(C*S*Ct + Q).inverse();
+    x = x + K*(z - C*x);
+    S = (I - K*C)*S;
+    
+    // return updated belief
+    StateBelief newBelief;
+    newBelief.state = x;
+    newBelief.covariance = S;
+    return newBelief;
+}
+
+StateBelief LinearPredExtendedKalmanFilter(
+    const StateBelief &priorBelief, 
+    const VectorXd &control,
+    const VectorXd &measurement,
+    const MatrixXd &stateTransition,
+    const MatrixXd &controlTransition,
+    const MatrixXd &processCovariance,
+    const EKF_MeasTransFunc &measTransition,
+    const MatrixXd &measJacobian,
+    const MatrixXd &measCovariance);
+{
+    VectorXd x = priorBelief.state;
+    MatrixXd S = priorBelief.covariance;
+    const VectorXd &u = control;
+    const VectorXd &z = measurement;
+
+    // predict belief based on prior belief & new control
+    const MatrixXd &A = stateTransition;
+    const MatrixXd &B = controlTransition;
+    const MatrixXd &R = processCovariance;
+    Matrix At = A.transpose();
+    x = A*x + B*u;
+    S = A*S*At + R;
+    
+    const EKF_MeasTransFunc &h = measTransition;
+    const MatrixXd &H = measJacobian;
+    const MatrixXd &Q = measCovariance;
+    MatrixXd Ht = H.transpose();
+    MatrixXd I = MatrixXd::Identity(x.size(), x.size());
+    MatrixXd K = S*Ht*(H*S*Ht + Q).inverse();
+    x = x + K*(z - h(x));
+    S = (I - K*H)*S;
+    
+    // return updated belief
+    StateBelief newBelief;
+    newBelief.state = x;
+    newBelief.covariance = S;
+    return newBelief;
 }

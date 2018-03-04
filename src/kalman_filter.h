@@ -66,4 +66,35 @@ public:
 
 };
 
+struct StateBelief
+{
+    Eigen::VectorXd state;
+    Eigen::MatrixXd covariance;
+};
+
+StateBelief KalmanFilter(
+    const StateBelief &priorBelief, 
+    const Eigen::VectorXd &control,
+    const Eigen::VectorXd &measurement,
+    const Eigen::MatrixXd &stateTransition,
+    const Eigen::MatrixXd &controlTransition,
+    const Eigen::MatrixXd &processCovariance,
+    const Eigen::MatrixXd &measTransition,
+    const Eigen::MatrixXd &measCovariance);
+    
+//using EKF_MeasTransFunc = Eigen::VectorXd (*)(const Eigen::VectorXd&);
+using EKF_MeasTransFunc = std::function<Eigen::Vector2d(const Eigen::Vector2d&)>;
+    
+StateBelief LinearPredExtendedKalmanFilter(
+    const StateBelief &priorBelief,
+    const Eigen::VectorXd &control,
+    const Eigen::VectorXd &measurement,
+    const Eigen::MatrixXd &stateTransition,
+    const Eigen::MatrixXd &controlTransition,
+    const Eigen::MatrixXd &processCovariance,
+    const EKF_MeasTransFunc &measTransition,
+    const Eigen::MatrixXd &measTransJacobian,
+    const Eigen::MatrixXd &measCovariance);
+
+
 #endif /* KALMAN_FILTER_H_ */
