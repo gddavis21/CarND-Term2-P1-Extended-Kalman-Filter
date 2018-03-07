@@ -1,5 +1,6 @@
 #ifndef KALMAN_FILTER_H_
 #define KALMAN_FILTER_H_
+#include <utility>
 #include "Eigen/Dense"
 
 class KalmanFilter {
@@ -72,6 +73,14 @@ struct StateBelief
     Eigen::MatrixXd covariance;
 };
 
+class EKF_MeasPredictor
+{
+public:
+    using MeasPred = std::pair<Eigen::VectorXd, Eigen::MatrixXd>;
+    virtual MeasPred PredictMeasurement(const Eigen::VectorXd &state) const = 0;
+    virtual Eigen::VectorXd NormalizeResidual(const Eigen::VectorXd &res) const = 0;
+};
+
 StateBelief KalmanFilter(
     const StateBelief &priorBelief, 
     const Eigen::VectorXd &control,
@@ -92,8 +101,7 @@ StateBelief LinearPredExtendedKalmanFilter(
     const Eigen::MatrixXd &stateTransition,
     const Eigen::MatrixXd &controlTransition,
     const Eigen::MatrixXd &processCovariance,
-    const EKF_MeasTransFunc &measTransition,
-    const Eigen::MatrixXd &measTransJacobian,
+    const EKF_MeasPredictor &measPredictor,
     const Eigen::MatrixXd &measCovariance);
 
 

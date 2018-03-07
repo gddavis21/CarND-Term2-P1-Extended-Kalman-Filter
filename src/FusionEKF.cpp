@@ -10,61 +10,116 @@ using std::vector;
 
 static const double PI = acos(-1.0);
 
-VectorXd StateToRadar(const VectorXd &state) 
+class EKF_RadarMeasPredictor : public EKF_MeasPredictor
 {
-    double x = state(0);   // x position
-    double y = state(1);   // y position
-    double u = state(2);   // x velocity
-    double v = state(3);   // y velocity
-    
-    double range = sqrt(x*x + y*y);
-    
-    if (range < 0.0001)
-        return VectorXd::Zero(3);
-    
-    double heading = atan2(y, x);
-    double range_rate = (x*u + y*v) / range;
-    
-    while (heading > PI)
-        heading -= 2*PI;
-    
-    while (heading < -PI)
-        heading += 2*PI;
-    
-    VectorXd radar(3);
-    radar << range, heading, range_rate;
-    return radar;
-}
-
-MatrixXd StateToRadarJacobian(const VectorXd &state)
-{
-    // recover state parameters
-    double x = state(0);   // x position
-    double y = state(1);   // y position
-    double u = state(2);   // x velocity
-    double v = state(3);   // y velocity
-
-    double r = sqrt(x*x + y*y);
-    double r2 = r*r;
-    double r3 = r2*r;
-    double n = u*y - v*x;
-	
-    // check for division by zero
-    if (r < 0.0001)
+public:
+    virtual MeasPred PredictMeasurement(const VectorXd &state) const override
     {
-        cout << "Divide-by-zero error" << endl;
-        return MatrixXd::Zero(3,4);
+        double x = state(0);   // x position
+        double y = state(1);   // y position
+        double u = state(2);   // x velocity
+        double v = state(3);   // y velocity
+        
+        double range = sqrt(x*x + y*y);
+        
+        if (range < 0.0001)
+        {
+            cout << "Divide-by-zero error" << endl;
+            return make_pair(
+                VectorXd::Zero(3),
+                MatrixXd::Zero(3,4));
+        }
+        
+        double heading = NormalizeAngle(atan2(y, x));
+        double range_rate = (x*u + y*v) / range;
+        
+        VectorXd meas(3);
+        meas << range, heading, range_rate;
+        
+        double r = range;
+        double r2 = r*r;
+        double r3 = r2*r;
+        double n = u*y - v*x;
+        
+        // compute Jacobian of radar 
+        MatrixXd jacobian(3,4);
+        jacobian << 
+            x/r,     y/r,   0,   0,
+            -y/r2,    x/r2,   0,   0,
+            y*n/r3, -x*n/r3, x/r, y/r;
+
+        return make_pair(meas, jacobian);
     }
 
-    // compute Jacobian of radar 
-    MatrixXd jacobian(3,4);
-    jacobian << 
-           x/r,     y/r,   0,   0,
-         -y/r2,    x/r2,   0,   0,
-        y*n/r3, -x*n/r3, x/r, y/r;
+    virtual VectorXd NormalizeResidual(const VectorXd &res) const override
+    {
+        VectorXd normRes(3);
+        normRes << res(0), NormalizeAngle(res(1)), res(2);
+        return normRes;
+    }
 
-    return jacobian;
-}
+private:
+    static double NormalizeAngle(double a)
+    {
+        return fmod(a + PI) - PI;
+    }
+};
+
+// VectorXd StateToRadar(const VectorXd &state) 
+// {
+//     double x = state(0);   // x position
+//     double y = state(1);   // y position
+//     double u = state(2);   // x velocity
+//     double v = state(3);   // y velocity
+    
+//     double range = sqrt(x*x + y*y);
+    
+//     if (range < 0.0001)
+//         return VectorXd::Zero(3);
+    
+//     double heading = atan2(y, x);
+//     double range_rate = (x*u + y*v) / range;
+    
+//     while (heading > PI)
+//         heading -= 2*PI;
+    
+//     while (heading < -PI)
+//         heading += 2*PI;
+    
+//     VectorXd radar(3);
+//     radar << range, heading, range_rate;
+//     return radar;
+// }
+
+// MatrixXd StateToRadarJacobian(const VectorXd &state)
+// {
+//     // recover state parameters
+//     double x = state(0);   // x position
+//     double y = state(1);   // y position
+//     double u = state(2);   // x velocity
+//     double v = state(3);   // y velocity
+
+//     double r = sqrt(x*x + y*y);
+//     double r2 = r*r;
+//     double r3 = r2*r;
+//     double n = u*y - v*x;
+	
+//     // check for division by zero
+//     if (r < 0.0001)
+//     {
+//         cout << "Divide-by-zero error" << endl;
+//         return MatrixXd::Zero(3,4);
+//     }
+
+//     // compute Jacobian of radar 
+//     MatrixXd jacobian(3,4);
+//     jacobian << 
+//            x/r,     y/r,   0,   0,
+//          -y/r2,    x/r2,   0,   0,
+//         y*n/r3, -x*n/r3, x/r, y/r;
+
+//     return jacobian;
+// }
 
 /*
  * Constructor.
@@ -181,6 +236,8 @@ void FusionEKF::ProcessMeasurement(const MeasurementPackage &measurement_pack)
 
     if (measurement_pack.sensor_type_ == MeasurementPackage::RADAR) 
     {
+        EKF_RadarMeasPredictor radarMeasPredictor;
+
         // Radar updates
         _currentBelief = LinearPredExtendedKalmanFilter(
             _currentBelief,
@@ -189,8 +246,7 @@ void FusionEKF::ProcessMeasurement(const MeasurementPackage &measurement_pack)
             StateTransition(dt),
             _ctrlTransition,
             ProcessCovariance(dt, _noise_ax, _noise_ay),
-            &StateToRadar,
-            StateToRadarJacobian(_currentBelief.state),
+            radarMeasPredictor,
             _measCovariance_Radar);
     } 
     else 

@@ -106,8 +106,7 @@ StateBelief LinearPredExtendedKalmanFilter(
     const MatrixXd &stateTransition,
     const MatrixXd &controlTransition,
     const MatrixXd &processCovariance,
-    const EKF_MeasTransFunc &measTransition,
-    const MatrixXd &measJacobian,
+    const EKF_MeasPredictor &measPredictor,
     const MatrixXd &measCovariance);
 {
     VectorXd x = priorBelief.state;
@@ -123,13 +122,15 @@ StateBelief LinearPredExtendedKalmanFilter(
     x = A*x + B*u;
     S = A*S*At + R;
     
-    const EKF_MeasTransFunc &h = measTransition;
-    const MatrixXd &H = measJacobian;
+    auto pred = measPredictor.PredictMeasurement(x);
+    const VectorXd &z_pred = pred.first;
+    const MatrixXd &H = pred.second;
     const MatrixXd &Q = measCovariance;
     MatrixXd Ht = H.transpose();
     MatrixXd I = MatrixXd::Identity(x.size(), x.size());
     MatrixXd K = S*Ht*(H*S*Ht + Q).inverse();
-    x = x + K*(z - h(x));
+    VectorXd y = measPredictor.NormalizeResidual(z - z_pred);
+    x = x + K*y;
     S = (I - K*H)*S;
     
     // return updated belief
