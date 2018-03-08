@@ -2,124 +2,13 @@
 #include "tools.h"
 #include "Eigen/Dense"
 #include <iostream>
+#include <cmath>
 
 using namespace std;
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
-using std::vector;
 
 static const double PI = acos(-1.0);
-
-class EKF_RadarMeasPredictor : public EKF_MeasPredictor
-{
-public:
-    virtual MeasPred PredictMeasurement(const VectorXd &state) const override
-    {
-        double x = state(0);   // x position
-        double y = state(1);   // y position
-        double u = state(2);   // x velocity
-        double v = state(3);   // y velocity
-        
-        double range = sqrt(x*x + y*y);
-        
-        if (range < 0.0001)
-        {
-            cout << "Divide-by-zero error" << endl;
-            return make_pair(
-                VectorXd::Zero(3),
-                MatrixXd::Zero(3,4));
-        }
-        
-        double heading = NormalizeAngle(atan2(y, x));
-        double range_rate = (x*u + y*v) / range;
-        
-        VectorXd meas(3);
-        meas << range, heading, range_rate;
-        
-        double r = range;
-        double r2 = r*r;
-        double r3 = r2*r;
-        double n = u*y - v*x;
-        
-        // compute Jacobian of radar 
-        MatrixXd jacobian(3,4);
-        jacobian << 
-            x/r,     y/r,   0,   0,
-            -y/r2,    x/r2,   0,   0,
-            y*n/r3, -x*n/r3, x/r, y/r;
-
-        return make_pair(meas, jacobian);
-    }
-
-    virtual VectorXd NormalizeResidual(const VectorXd &res) const override
-    {
-        VectorXd normRes(3);
-        normRes << res(0), NormalizeAngle(res(1)), res(2);
-        return normRes;
-    }
-
-private:
-    static double NormalizeAngle(double a)
-    {
-        return fmod(a + PI) - PI;
-    }
-};
-
-// VectorXd StateToRadar(const VectorXd &state) 
-// {
-//     double x = state(0);   // x position
-//     double y = state(1);   // y position
-//     double u = state(2);   // x velocity
-//     double v = state(3);   // y velocity
-    
-//     double range = sqrt(x*x + y*y);
-    
-//     if (range < 0.0001)
-//         return VectorXd::Zero(3);
-    
-//     double heading = atan2(y, x);
-//     double range_rate = (x*u + y*v) / range;
-    
-//     while (heading > PI)
-//         heading -= 2*PI;
-    
-//     while (heading < -PI)
-//         heading += 2*PI;
-    
-//     VectorXd radar(3);
-//     radar << range, heading, range_rate;
-//     return radar;
-// }
-
-// MatrixXd StateToRadarJacobian(const VectorXd &state)
-// {
-//     // recover state parameters
-//     double x = state(0);   // x position
-//     double y = state(1);   // y position
-//     double u = state(2);   // x velocity
-//     double v = state(3);   // y velocity
-
-//     double r = sqrt(x*x + y*y);
-//     double r2 = r*r;
-//     double r3 = r2*r;
-//     double n = u*y - v*x;
-	
-//     // check for division by zero
-//     if (r < 0.0001)
-//     {
-//         cout << "Divide-by-zero error" << endl;
-//         return MatrixXd::Zero(3,4);
-//     }
-
-//     // compute Jacobian of radar 
-//     MatrixXd jacobian(3,4);
-//     jacobian << 
-//            x/r,     y/r,   0,   0,
-//          -y/r2,    x/r2,   0,   0,
-//         y*n/r3, -x*n/r3, x/r, y/r;
-
-//     return jacobian;
-// }
 
 /*
  * Constructor.
@@ -130,22 +19,18 @@ FusionEKF::FusionEKF()
     _prevTime = 0;
     _noise_ax = _noise_ay = 9;
 
-    // not tracking control vector in this project
-    _control = VectorXd::Zero(4);
-    _ctrlTransition = MatrixXd::Zero(4,4);
-
-    _measTransition = MatrixXd(2, 4);
-    _measTransition << 
+    _laserMeasTransition = MatrixXd(2, 4);
+    _laserMeasTransition << 
         1, 0, 0, 0,
         0, 1, 0, 0;
     
-    _measCovariance_Laser = MatrixXd(2,2);
-    _measCovariance_Laser << 
+    _laserMeasCovariance = MatrixXd(2,2);
+    _laserMeasCovariance << 
         0.0225, 0.    ,
         0.    , 0.0225;
     
-    _measCovariance_Radar = MatrixXd(3,3);
-    _measCovariance_Radar <<
+    _radarMeasCovariance = MatrixXd(3,3);
+    _radarMeasCovariance <<
         0.09, 0.    , 0.  ,
         0.  , 0.0009, 0.  ,
         0.  , 0.    , 0.09;
@@ -221,8 +106,8 @@ void FusionEKF::ProcessMeasurement(const MeasurementPackage &measurement_pack)
     */
 
     //compute the time elapsed between the current and previous measurements
-    double dt = (measurement_pack.timestamp_ - previous_timestamp_) / 1000000.0;	//dt - expressed in seconds
-    previous_timestamp_ = measurement_pack.timestamp_;
+    double dt = (measurement_pack.timestamp_ - _prevTime) / 1000000.0;	//dt - expressed in seconds
+    _prevTime = measurement_pack.timestamp_;
 
     /*****************************************************************************
     *  Update
@@ -234,51 +119,58 @@ void FusionEKF::ProcessMeasurement(const MeasurementPackage &measurement_pack)
     * Update the state and covariance matrices.
     */
 
+    MatrixXd stateTransition = CalcStateTransition(dt);
+    MatrixXd processCovariance = CalcProcessCovariance(dt);
+
+    // dummy control vector (not tracking control vector in this project)
+    static VectorXd control = VectorXd::Zero(4);
+    static MatrixXd ctrlTransition = MatrixXd::Zero(4,4);
+
+    VectorXd measurement = measurement_pack.raw_measurements_;
+
     if (measurement_pack.sensor_type_ == MeasurementPackage::RADAR) 
     {
-        EKF_RadarMeasPredictor radarMeasPredictor;
-
         // Radar updates
-        _currentBelief = LinearPredExtendedKalmanFilter(
+        _currentBelief = KalmanFilter::EKF_LinearPred(
             _currentBelief,
-            _control,
-            measurement_pack.raw_measurements_,
-            StateTransition(dt),
-            _ctrlTransition,
-            ProcessCovariance(dt, _noise_ax, _noise_ay),
-            radarMeasPredictor,
-            _measCovariance_Radar);
+            control,
+            stateTransition,
+            ctrlTransition,
+            processCovariance,
+            measurement,
+            _radarMeasPredictor,
+            _radarMeasCovariance);
     } 
     else 
     {
         // Laser updates
-        _currentBelief = KalmanFilter(
+        _currentBelief = KalmanFilter::KF(
             _currentBelief,
-            _control,
-            measurement_pack.raw_measurements_,
-            StateTransition(dt),
-            _ctrlTransition,
-            ProcessCovariance(dt, _noise_ax, _noise_ay),
-            _measTransition,
-            _measCovariance_Laser);
+            control,
+            stateTransition,
+            ctrlTransition,
+            processCovariance,
+            measurement,
+            _laserMeasTransition,
+            _laserMeasCovariance);
     }
 
-    // print the output
-    cout << "x_ = " << ekf_.x_ << endl;
-    cout << "P_ = " << ekf_.P_ << endl;
+    // // print the output
+    // cout << "x_ = " << ekf_.x_ << endl;
+    // cout << "P_ = " << ekf_.P_ << endl;
 }
 
-Eigen::Vector2d FusionEKF::GetPosition() const
+Vector2d FusionEKF::GetCurrentPosition() const
 {
     return Vector2d(_currentBelief.state(0), _currentBelief.state(1));
 }
 
-Eigen::Vector2d FusionEKF::GetVelocity() const
+Vector2d FusionEKF::GetCurrentVelocity() const
 {
     return Vector2d(_currentBelief.state(2), _currentBelief.state(3));
 }
 
-Eigen::MatrixXd FusionEKF::StateTransition(double dt)
+MatrixXd FusionEKF::CalcStateTransition(double dt) const
 {
     // integrate elapsed time into state transition matrix
     MatrixXd A(4,4);
@@ -291,14 +183,14 @@ Eigen::MatrixXd FusionEKF::StateTransition(double dt)
     return A;
 }
 
-Eigen::MatrixXd FusionEKF::ProcessCovariance(
-    double dt,  // elapsed time
-    double nx,  // x-acceleration noise variance
-    double ny)  // y-acceleration noise variance
+MatrixXd FusionEKF::CalcProcessCovariance(double dt) const
 {
     double dt2 = dt*dt;     // dt^2
     double dt3 = dt2*dt;    // dt^3
     double dt4 = dt3*dt;    // dt^4
+
+    double nx = _noise_ax;
+    double ny = _noise_ay;
 
     MatrixXd R(4,4);
     R << 
@@ -308,4 +200,56 @@ Eigen::MatrixXd FusionEKF::ProcessCovariance(
                0, ny*dt3/2,        0,   ny*dt2;
 
     return R;
+}
+
+EKF_RadarMeasPredictor::EKF_RadarMeasPredictor() {}
+
+EKF_MeasPredictor::MeasPred EKF_RadarMeasPredictor::PredictMeasurement(const VectorXd &state) const
+{
+    double x = state(0);   // x position
+    double y = state(1);   // y position
+    double u = state(2);   // x velocity
+    double v = state(3);   // y velocity
+    
+    double range = sqrt(x*x + y*y);
+    
+    if (range < 0.0001)
+    {
+        cout << "Divide-by-zero error" << endl;
+        return make_pair(
+            VectorXd::Zero(3),
+            MatrixXd::Zero(3,4));
+    }
+    
+    double heading = NormalizeHeading(atan2(y, x));
+    double range_rate = (x*u + y*v) / range;
+    
+    VectorXd meas(3);
+    meas << range, heading, range_rate;
+    
+    double r = range;
+    double r2 = r*r;
+    double r3 = r2*r;
+    double n = u*y - v*x;
+    
+    // compute Jacobian for radar measurement update
+    MatrixXd jacobian(3,4);
+    jacobian << 
+        x/r,     y/r,   0,   0,
+        -y/r2,    x/r2,   0,   0,
+        y*n/r3, -x*n/r3, x/r, y/r;
+
+    return make_pair(meas, jacobian);
+}
+
+VectorXd EKF_RadarMeasPredictor::NormalizeResidual(const VectorXd &res) const override
+{
+    VectorXd normRes(3);
+    normRes << res(0), NormalizeHeading(res(1)), res(2);
+    return normRes;
+}
+
+double EKF_RadarMeasPredictor::NormalizeHeading(double angle)
+{
+    return fmod(angle + PI, 2*PI) - PI;
 }

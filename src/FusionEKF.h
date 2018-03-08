@@ -9,50 +9,43 @@
 #include "kalman_filter.h"
 #include "tools.h"
 
-class FusionEKF {
+class EKF_RadarMeasPredictor : public EKF_MeasPredictor 
+{
 public:
-  /**
-  * Constructor.
-  */
-  FusionEKF();
-
-  /**
-  * Destructor.
-  */
-  virtual ~FusionEKF();
-
-  /**
-  * Run the whole flow of the Kalman Filter from here.
-  */
-  void ProcessMeasurement(const MeasurementPackage &measurement_pack);
-
-  // /**
-  // * Kalman Filter update and prediction math lives in here.
-  // */
-  // KalmanFilter ekf_;
-  Eigen::Vector2d GetCurrentPosition() const;
-  Eigen::Vector2d GetCurrentVelocity() const;
-  
+    EKF_RadarMeasPredictor();
+    virtual MeasPred PredictMeasurement(const Eigen::VectorXd &state) const override;
+    virtual Eigen::VectorXd NormalizeResidual(const Eigen::VectorXd &res) const override;
 
 private:
-  // tool object used to compute Jacobian and RMSE
-  Tools tools;
-  Eigen::MatrixXd R_laser_;
-  Eigen::MatrixXd R_radar_;
-  Eigen::MatrixXd H_laser_;
-  Eigen::MatrixXd Hj_;
-  
-    static Eigen::MatrixXd StateTransition(double dt);
-    static Eigen::MatrixXd ProcessCovariance(double dt, double nx, double ny);
+    static double NormalizeHeading(double angle);
+};
     
+class FusionEKF
+{
+public:
+    FusionEKF();
+    virtual ~FusionEKF();
+
+    // Run the whole flow of the Kalman Filter from here.
+    void ProcessMeasurement(const MeasurementPackage &measurement_pack);
+
+    // Query updated position/velocity
+    Eigen::Vector2d GetCurrentPosition() const;
+    Eigen::Vector2d GetCurrentVelocity() const;
+
+private:
+    Eigen::MatrixXd CalcStateTransition(double dt) const;
+    Eigen::MatrixXd CalcProcessCovariance(double dt) const;
+
     bool _initialized;
     long long _prevTime;
     StateBelief _currentBelief;
     Eigen::VectorXd _control;
     Eigen::MatrixXd _ctrlTransition;
-    Eigen::MatrixXd _measTransition;
-    Eigen::MatrixXd _measCovariance_Laser;
-    Eigen::MatrixXd _measCovariance_Radar;
+    Eigen::MatrixXd _laserMeasTransition;
+    Eigen::MatrixXd _laserMeasCovariance;
+    EKF_RadarMeasPredictor _radarMeasPredictor;
+    Eigen::MatrixXd _radarMeasCovariance;
 };
 
 #endif /* FusionEKF_H_ */
