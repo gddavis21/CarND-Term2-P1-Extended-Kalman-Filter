@@ -3,89 +3,16 @@
 #include <utility>
 #include "Eigen/Dense"
 
-// class KalmanFilter {
-// public:
-
-//   // state vector
-//   Eigen::VectorXd x_;
-
-//   // state covariance matrix
-//   Eigen::MatrixXd P_;
-
-//   // state transition matrix
-//   Eigen::MatrixXd F_;
-
-//   // process covariance matrix
-//   Eigen::MatrixXd Q_;
-
-//   // measurement matrix
-//   Eigen::MatrixXd H_;
-
-//   // measurement covariance matrix
-//   Eigen::MatrixXd R_;
-
-//   /**
-//    * Constructor
-//    */
-//   KalmanFilter();
-
-//   /**
-//    * Destructor
-//    */
-//   virtual ~KalmanFilter();
-
-//   /**
-//    * Init Initializes Kalman filter
-//    * @param x_in Initial state
-//    * @param P_in Initial state covariance
-//    * @param F_in Transition matrix
-//    * @param H_in Measurement matrix
-//    * @param R_in Measurement covariance matrix
-//    * @param Q_in Process covariance matrix
-//    */
-//   void Init(Eigen::VectorXd &x_in, Eigen::MatrixXd &P_in, Eigen::MatrixXd &F_in,
-//       Eigen::MatrixXd &H_in, Eigen::MatrixXd &R_in, Eigen::MatrixXd &Q_in);
-
-//   /**
-//    * Prediction Predicts the state and the state covariance
-//    * using the process model
-//    * @param delta_T Time between k and k+1 in s
-//    */
-//   void Predict();
-
-//   /**
-//    * Updates the state by using standard Kalman Filter equations
-//    * @param z The measurement at k+1
-//    */
-//   void Update(const Eigen::VectorXd &z);
-
-//   /**
-//    * Updates the state by using Extended Kalman Filter equations
-//    * @param z The measurement at k+1
-//    */
-//   void UpdateEKF(const Eigen::VectorXd &z);
-
-// };
-
-struct StateBelief
+namespace GaussianFilters
 {
-    Eigen::VectorXd state;
-    Eigen::MatrixXd covariance;
-};
+    struct StateBelief
+    {
+        Eigen::VectorXd state;
+        Eigen::MatrixXd covariance;
+    };
 
-class EKF_MeasPredictor
-{
-public:
-    using MeasPred = std::pair<Eigen::VectorXd, Eigen::MatrixXd>;
-    virtual MeasPred PredictMeasurement(const Eigen::VectorXd &state) const = 0;
-    virtual Eigen::VectorXd NormalizeResidual(const Eigen::VectorXd &res) const = 0;
-};
-
-class KalmanFilter
-{
-public:
-    // standard Kalman Filter
-    static StateBelief KF(
+    // Kalman Filter state estimation
+    StateBelief KalmanFilter(
         const StateBelief &priorBelief, 
         const Eigen::VectorXd &control,
         const Eigen::MatrixXd &stateTransition,
@@ -95,8 +22,12 @@ public:
         const Eigen::MatrixXd &measTransition,
         const Eigen::MatrixXd &measCovariance);
 
-    // Extended Kalman Filter with Linear Prediction (nonlinear measurement update)
-    static StateBelief EKF_LinearPred(
+    class EKF_MeasPredictor;  // client-supplied nonlinear transformation
+
+    // Extended Kalman Filter state estimation 
+    // This version differs from typical EKF by combining a linear state
+    // prediction with a nonlinear measurement update.
+    StateBelief ExtendedKalmanFilter_LinearPred(
         const StateBelief &priorBelief,
         const Eigen::VectorXd &control,
         const Eigen::MatrixXd &stateTransition,
@@ -105,6 +36,23 @@ public:
         const Eigen::VectorXd &measurement,
         const EKF_MeasPredictor &measPredictor,
         const Eigen::MatrixXd &measCovariance);
-};
+
+    // Client-supplied nonlinear transformation from state space to measurement space.
+    // Enables EKF algorithm to compute measurement residual from state prediction.
+    class EKF_MeasPredictor
+    {
+    public:
+        using MeasPred = std::pair<Eigen::VectorXd, Eigen::MatrixXd>;
+        
+        // Transform state vector to measurement space, and compute corresponding 
+        // Jacobian matrix of the measurement w.r.t. input state (both required by EKF).
+        // Returns <measurement,Jacobian> pair.
+        virtual MeasPred PredictMeasurement(const Eigen::VectorXd &state) const = 0;
+
+        // EKF computes the measurement residual, which may need to be adjusted
+        // before using for further computations.
+        virtual Eigen::VectorXd NormalizeResidual(const Eigen::VectorXd &res) const = 0;
+    };
+}
 
 #endif /* KALMAN_FILTER_H_ */

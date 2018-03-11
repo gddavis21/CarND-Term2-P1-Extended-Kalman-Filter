@@ -9,7 +9,7 @@
 #include "kalman_filter.h"
 #include "tools.h"
 
-class EKF_RadarMeasPredictor : public EKF_MeasPredictor 
+class EKF_RadarMeasPredictor : public GaussianFilters::EKF_MeasPredictor 
 {
 public:
     EKF_RadarMeasPredictor();
@@ -20,6 +20,8 @@ private:
     static double NormalizeHeading(double angle);
 };
     
+// Fuse supplied Lidar & Radar measurements with (Extended) Kalman Filter 
+// algorithm to track position/velocity of object in motion.
 class FusionEKF
 {
 public:
@@ -37,9 +39,11 @@ private:
     Eigen::MatrixXd CalcStateTransition(double dt) const;
     Eigen::MatrixXd CalcProcessCovariance(double dt) const;
 
+    double _noise_ax;
+    double _noise_ay;
     bool _initialized;
     long long _prevTime;
-    StateBelief _currentBelief;
+    GaussianFilters::StateBelief _currentBelief;
     Eigen::VectorXd _control;
     Eigen::MatrixXd _ctrlTransition;
     Eigen::MatrixXd _laserMeasTransition;

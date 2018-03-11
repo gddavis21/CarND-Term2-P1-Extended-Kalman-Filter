@@ -110,17 +110,17 @@ int main()
 
     	  //Push the current estimated x,y positon from the Kalman filter's state vector
 
-          Vector2d pos = fusionEKF.GetPosition();
-          Vector2d vel = fusionEKF.GetVelocity();
+        Eigen::Vector2d pos = fusionEKF.GetCurrentPosition();
+        Eigen::Vector2d vel = fusionEKF.GetCurrentVelocity();
     	  VectorXd estimate(4);
-          estimate << pos(0), pos(1), vel(0), vel(1);
+        estimate << pos(0), pos(1), vel(0), vel(1);
     	  estimations.push_back(estimate);
 
     	  VectorXd RMSE = tools.CalculateRMSE(estimations, ground_truth);
 
           json msgJson;
-          msgJson["estimate_x"] = p_x;
-          msgJson["estimate_y"] = p_y;
+          msgJson["estimate_x"] = pos(0);
+          msgJson["estimate_y"] = pos(1);
           msgJson["rmse_x"] =  RMSE(0);
           msgJson["rmse_y"] =  RMSE(1);
           msgJson["rmse_vx"] = RMSE(2);
